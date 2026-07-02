@@ -1,6 +1,7 @@
 pub(crate) mod debug_sandbox;
 mod exit_status;
 pub(crate) mod login;
+pub mod profile_manager_cmd;
 
 use clap::Args;
 use clap::Parser;

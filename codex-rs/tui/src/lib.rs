@@ -218,6 +218,7 @@ use crate::startup_hooks_review::load_startup_hooks_review_entry;
 use crate::startup_hooks_review::maybe_run_startup_hooks_review;
 use crate::tui::Tui;
 pub use cli::Cli;
+pub use cli::ProfileAuthLaunch;
 use codex_arg0::Arg0DispatchPaths;
 pub use markdown_render::render_markdown_text;
 pub use public_widgets::composer_input::ComposerAction;
@@ -890,11 +891,17 @@ pub async fn run_main(
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
-    let codex_home = match find_codex_home() {
-        Ok(codex_home) => codex_home.to_path_buf(),
-        Err(err) => {
-            eprintln!("Error finding codex home: {err}");
-            std::process::exit(1);
+    let profile_auth_launch = cli.profile_auth_launch.clone();
+    let codex_home = if let Some(launch) = profile_auth_launch.as_ref() {
+        launch.codex_home.clone()
+    } else {
+        match find_codex_home() {
+            Ok(codex_home) => codex_home.to_path_buf(),
+            #[allow(clippy::print_stderr)]
+            Err(err) => {
+                eprintln!("Error finding codex home: {err}");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -1057,11 +1064,13 @@ pub async fn run_main(
         main_execve_wrapper_exe: arg0_paths.main_execve_wrapper_exe.clone(),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         bypass_hook_trust: cli.bypass_hook_trust.then_some(true),
+        profile_auth_failover: profile_auth_launch.map(|launch| launch.failover),
         additional_writable_roots: additional_dirs,
         ..Default::default()
     };
 
     let mut config = load_config_or_exit(
+        Some(codex_home.clone()),
         cli_kv_overrides.clone(),
         overrides.clone(),
         loader_overrides.clone(),
@@ -1117,6 +1126,7 @@ pub async fn run_main(
             {
                 Ok(true) => {
                     config = load_config_or_exit(
+                        Some(codex_home.clone()),
                         cli_kv_overrides.clone(),
                         overrides.clone(),
                         loader_overrides.clone(),
@@ -1456,6 +1466,7 @@ async fn run_ratatui_app(
             || (show_login_screen && !uses_remote_workspace)
         {
             load_config_or_exit(
+                Some(initial_config.codex_home.to_path_buf()),
                 cli_kv_overrides.clone(),
                 overrides.clone(),
                 loader_overrides.clone(),
@@ -1660,6 +1671,7 @@ async fn run_ratatui_app(
     let mut config = match &session_selection {
         resume_picker::SessionSelection::Resume(_) | resume_picker::SessionSelection::Fork(_) => {
             load_config_or_exit_with_fallback_cwd(
+                Some(config.codex_home.to_path_buf()),
                 cli_kv_overrides.clone(),
                 overrides.clone(),
                 loader_overrides.clone(),
@@ -1671,6 +1683,7 @@ async fn run_ratatui_app(
         }
         resume_picker::SessionSelection::StartFresh if picker_cancelled_without_selection => {
             load_config_or_exit(
+                Some(config.codex_home.to_path_buf()),
                 cli_kv_overrides.clone(),
                 overrides.clone(),
                 loader_overrides.clone(),
@@ -1898,6 +1911,7 @@ async fn get_login_status(
 }
 
 async fn load_config_or_exit(
+    codex_home: Option<PathBuf>,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
     loader_overrides: LoaderOverrides,
@@ -1905,6 +1919,7 @@ async fn load_config_or_exit(
     strict_config: bool,
 ) -> Config {
     load_config_or_exit_with_fallback_cwd(
+        codex_home,
         cli_kv_overrides,
         overrides,
         loader_overrides,
@@ -1916,6 +1931,7 @@ async fn load_config_or_exit(
 }
 
 async fn load_config_or_exit_with_fallback_cwd(
+    codex_home: Option<PathBuf>,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
     loader_overrides: LoaderOverrides,
@@ -1923,17 +1939,19 @@ async fn load_config_or_exit_with_fallback_cwd(
     strict_config: bool,
     fallback_cwd: Option<PathBuf>,
 ) -> Config {
-    #[allow(clippy::print_stderr)]
-    match ConfigBuilder::default()
+    let mut builder = ConfigBuilder::default()
         .cli_overrides(cli_kv_overrides)
         .harness_overrides(overrides)
         .loader_overrides(loader_overrides)
         .strict_config(strict_config)
         .cloud_config_bundle(cloud_config_bundle)
-        .fallback_cwd(fallback_cwd)
-        .build()
-        .await
-    {
+        .fallback_cwd(fallback_cwd);
+    if let Some(codex_home) = codex_home {
+        builder = builder.codex_home(codex_home);
+    }
+
+    #[allow(clippy::print_stderr)]
+    match builder.build().await {
         Ok(config) => config,
         Err(err) => {
             eprintln!("Error loading configuration: {err}");

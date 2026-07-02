@@ -1139,6 +1139,38 @@ async fn run_sampling_request(
                 if let Some(rate_limits) = rate_limits {
                     sess.update_rate_limits(&turn_context, *rate_limits).await;
                 }
+                if let Some(profile_auth_failover) = sess.services.profile_auth_failover.as_ref() {
+                    match profile_auth_failover
+                        .switch_after_usage_limit(&sess.services.auth_manager)
+                        .await
+                    {
+                        Ok(Some(profile)) => {
+                            *client_session = sess.services.model_client.new_session();
+                            sess.send_event(
+                                &turn_context,
+                                EventMsg::Warning(WarningEvent {
+                                    message: format!(
+                                        "Usage limit reached; switched to profile `{profile}` and retrying."
+                                    ),
+                                }),
+                            )
+                            .await;
+                            continue;
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            sess.send_event(
+                                &turn_context,
+                                EventMsg::Warning(WarningEvent {
+                                    message: format!(
+                                        "Usage limit reached, but profile failover failed: {err:#}"
+                                    ),
+                                }),
+                            )
+                            .await;
+                        }
+                    }
+                }
                 return Err(CodexErr::UsageLimitReached(e));
             }
             Err(err) => err,

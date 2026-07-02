@@ -210,6 +210,7 @@ mod input_queue;
 mod mcp;
 mod mcp_runtime;
 pub(crate) mod multi_agents;
+pub(crate) mod profile_auth_failover;
 mod review;
 mod rollout_budget;
 mod rollout_reconstruction;

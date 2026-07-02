@@ -606,6 +606,18 @@ pub enum ThreadStoreConfig {
 
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
+pub struct ProfileAuthCandidateConfig {
+    pub name: String,
+    pub auth_file: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProfileAuthFailoverConfig {
+    pub active_profile: String,
+    pub candidates: Vec<ProfileAuthCandidateConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     /// Provenance for how this [`Config`] was derived (merged layers + enforced
     /// requirements).
@@ -906,6 +918,9 @@ pub struct Config {
     ///
     /// This is a runtime-only knob populated from invocation overrides, not from config files.
     pub bypass_hook_trust: bool,
+
+    /// Runtime-only profile auth failover settings populated by `codex --best`.
+    pub profile_auth_failover: Option<ProfileAuthFailoverConfig>,
 
     /// Optional URI-based file opener. If set, citations to files in the model
     /// output will be hyperlinked using the specified URI scheme.
@@ -2395,6 +2410,7 @@ pub struct ConfigOverrides {
     pub tools_web_search_request: Option<bool>,
     pub ephemeral: Option<bool>,
     pub bypass_hook_trust: Option<bool>,
+    pub profile_auth_failover: Option<ProfileAuthFailoverConfig>,
     /// Additional directories that should be treated as writable roots for this session.
     pub additional_writable_roots: Vec<PathBuf>,
     /// Explicit absolute runtime workspace roots for this session. When set,
@@ -2983,6 +2999,7 @@ impl Config {
             tools_web_search_request: override_tools_web_search_request,
             ephemeral,
             bypass_hook_trust,
+            profile_auth_failover,
             additional_writable_roots,
             workspace_roots: workspace_roots_override,
         } = overrides;
@@ -3857,6 +3874,7 @@ impl Config {
             ephemeral: ephemeral.unwrap_or_default(),
             extra_config: None,
             bypass_hook_trust,
+            profile_auth_failover,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             codex_self_exe,
             codex_linux_sandbox_exe,

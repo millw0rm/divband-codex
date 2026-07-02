@@ -1041,6 +1041,18 @@ impl Session {
                 }).await;
             }
 
+            let failover_codex_home = config.codex_home.to_path_buf();
+            let profile_auth_failover = config
+                .profile_auth_failover
+                .clone()
+                .and_then(|failover_config| {
+                    super::profile_auth_failover::ProfileAuthFailover::new(
+                        failover_codex_home,
+                        failover_config,
+                    )
+                })
+                .map(Arc::new);
+
             let services = SessionServices {
                 // Initialize the MCP connection manager with an uninitialized
                 // instance. It will be replaced with one created via
@@ -1065,6 +1077,7 @@ impl Session {
                 show_raw_agent_reasoning: config.show_raw_agent_reasoning,
                 exec_policy,
                 auth_manager: Arc::clone(&auth_manager),
+                profile_auth_failover,
                 session_telemetry,
                 models_manager: Arc::clone(&models_manager),
                 tool_approvals: Mutex::new(ApprovalStore::default()),
