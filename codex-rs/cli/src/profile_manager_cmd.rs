@@ -54,6 +54,13 @@ mod tests;
     about = "Manage self-contained Codex profile homes"
 )]
 pub struct ProfilesCli {
+    #[command(flatten)]
+    args: ProfilesArgs,
+}
+
+/// Arguments for managing self-contained Codex profile homes.
+#[derive(Debug, Args)]
+pub struct ProfilesArgs {
     /// Root directory for all managed profile state.
     #[arg(long, env = "CODEX_PROFILES_DIR", value_name = "DIR")]
     root: Option<PathBuf>,
@@ -249,6 +256,12 @@ impl ProfilesCli {
     }
 
     fn run(self) -> anyhow::Result<()> {
+        self.args.run()
+    }
+}
+
+impl ProfilesArgs {
+    pub fn run(self) -> anyhow::Result<()> {
         let root = ProfilesRoot::new(resolve_root(self.root)?);
         let codex_bin = resolve_codex_bin(self.codex_bin);
         match self.command {

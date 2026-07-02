@@ -147,6 +147,9 @@ enum Subcommand {
     /// [experimental] Manage a portable pool of Codex account profiles.
     Pool(ProfilePoolCli),
 
+    /// Manage self-contained Codex account profile homes.
+    Profiles(codex_cli::profile_manager_cmd::ProfilesArgs),
+
     /// Start Codex as an MCP server (stdio).
     McpServer(McpServerCommand),
 
@@ -1121,6 +1124,14 @@ async fn cli_main(
                 .parse_overrides()
                 .map_err(anyhow::Error::msg)?;
             profile_pool_cmd::run(pool_cli, cli_overrides).await?;
+        }
+        Some(Subcommand::Profiles(profiles_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "profiles",
+            )?;
+            profiles_cli.run()?;
         }
         Some(Subcommand::AppServer(app_server_cli)) => {
             let AppServerCommand {
@@ -2171,6 +2182,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::Pool(_)) => Some("pool"),
+        Some(Subcommand::Profiles(_)) => Some("profiles"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),
         Some(Subcommand::Login(_)) => Some("login"),
@@ -2973,6 +2985,20 @@ mod tests {
         let cli = MultitoolCli::try_parse_from(["codex", "--best"]).expect("parse");
         assert!(cli.interactive.best_profile);
         assert!(cli.subcommand.is_none());
+    }
+
+    #[test]
+    fn profiles_add_parses_under_codex() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "profiles",
+            "add",
+            "work-account",
+            "--no-login",
+        ])
+        .expect("parse");
+
+        assert!(matches!(cli.subcommand, Some(Subcommand::Profiles(_))));
     }
 
     #[test]
