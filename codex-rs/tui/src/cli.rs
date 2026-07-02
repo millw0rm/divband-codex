@@ -1,9 +1,17 @@
+use crate::legacy_core::config::ProfileAuthFailoverConfig;
 use clap::Args;
 use clap::FromArgMatches;
 use clap::Parser;
 use codex_utils_cli::ApprovalModeCliArg;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::SharedCliOptions;
+use std::path::PathBuf;
+
+#[derive(Clone, Debug)]
+pub struct ProfileAuthLaunch {
+    pub codex_home: PathBuf,
+    pub failover: ProfileAuthFailoverConfig,
+}
 
 #[derive(Parser, Clone, Debug)]
 #[command(version)]
@@ -70,6 +78,13 @@ pub struct Cli {
     /// Runs the TUI in inline mode, preserving terminal scrollback history.
     #[arg(long = "no-alt-screen", default_value_t = false)]
     pub no_alt_screen: bool,
+
+    /// Select the best managed account profile for this project and enable usage-limit failover.
+    #[arg(long = "best", default_value_t = false)]
+    pub best_profile: bool,
+
+    #[clap(skip)]
+    pub profile_auth_launch: Option<ProfileAuthLaunch>,
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,

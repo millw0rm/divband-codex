@@ -31,6 +31,7 @@ use codex_state::memories_db_path;
 use codex_tui::AppExitInfo;
 use codex_tui::Cli as TuiCli;
 use codex_tui::ExitReason;
+use codex_tui::ProfileAuthLaunch;
 use codex_tui::UpdateAction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
@@ -53,6 +54,7 @@ mod exec_server_telemetry;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod plugin_cmd;
+mod profile_pool_cmd;
 mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
@@ -63,6 +65,7 @@ mod wsl_paths;
 use crate::mcp_cmd::McpCli;
 use crate::plugin_cmd::PluginCli;
 use crate::plugin_cmd::PluginSubcommand;
+use crate::profile_pool_cmd::ProfilePoolCli;
 use crate::remote_control_cmd::RemoteControlCommand;
 use doctor::DoctorCommand;
 use state_db_recovery as local_state_db;
@@ -140,6 +143,9 @@ enum Subcommand {
 
     /// Manage Codex plugins.
     Plugin(PluginCli),
+
+    /// [experimental] Manage a portable pool of Codex account profiles.
+    Pool(ProfilePoolCli),
 
     /// Start Codex as an MCP server (stdio).
     McpServer(McpServerCommand),
@@ -986,6 +992,14 @@ async fn cli_main(
 
     match subcommand {
         None => {
+            if interactive.best_profile {
+                reject_remote_mode_for_subcommand(
+                    root_remote.as_deref(),
+                    root_remote_auth_token_env.as_deref(),
+                    "--best",
+                )?;
+                configure_best_profile_launch(&mut interactive).await?;
+            }
             prepend_config_flags(
                 &mut interactive.config_overrides,
                 root_config_overrides.clone(),
@@ -1096,6 +1110,17 @@ async fn cli_main(
                     plugin_cmd::run_plugin_remove(overrides, args).await?;
                 }
             }
+        }
+        Some(Subcommand::Pool(pool_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "pool",
+            )?;
+            let cli_overrides = root_config_overrides
+                .parse_overrides()
+                .map_err(anyhow::Error::msg)?;
+            profile_pool_cmd::run(pool_cli, cli_overrides).await?;
         }
         Some(Subcommand::AppServer(app_server_cli)) => {
             let AppServerCommand {
@@ -1820,6 +1845,30 @@ async fn load_exec_server_config(
         .await?)
 }
 
+async fn configure_best_profile_launch(interactive: &mut TuiCli) -> anyhow::Result<()> {
+    eprintln!("Refreshing profile usage limits...");
+    let project_dir = interactive.cwd.clone();
+    let launch = tokio::task::spawn_blocking(move || {
+        codex_cli::profile_manager_cmd::prepare_best_profile_launch(
+            /*root_dir*/ None,
+            project_dir.as_deref(),
+            /*refresh_limits*/ true,
+        )
+    })
+    .await??;
+    eprintln!(
+        "Using project {} with profile {}; CODEX_HOME={}",
+        launch.project_id,
+        launch.active_profile,
+        launch.codex_home.display()
+    );
+    interactive.profile_auth_launch = Some(ProfileAuthLaunch {
+        codex_home: launch.codex_home,
+        failover: launch.failover,
+    });
+    Ok(())
+}
+
 async fn load_exec_server_remote_auth(
     config: &codex_core::config::Config,
     missing_auth_error: &'static str,
@@ -2121,6 +2170,7 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
+        Some(Subcommand::Pool(_)) => Some("pool"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),
         Some(Subcommand::Login(_)) => Some("login"),
@@ -2916,6 +2966,13 @@ mod tests {
     fn update_parses_as_update_subcommand() {
         let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
         assert!(matches!(cli.subcommand, Some(Subcommand::Update)));
+    }
+
+    #[test]
+    fn best_profile_parses_on_interactive_root() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--best"]).expect("parse");
+        assert!(cli.interactive.best_profile);
+        assert!(cli.subcommand.is_none());
     }
 
     #[test]
