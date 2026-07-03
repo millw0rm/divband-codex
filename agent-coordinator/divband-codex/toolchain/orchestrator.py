@@ -59,6 +59,10 @@ FOCUSED_TESTS = [
     ),
 ]
 
+FOCUSED_NO_MCP_TESTS = [
+    test for test in FOCUSED_TESTS if test[0] != "test-mcp-cursor-session"
+]
+
 EXPANDED_TESTS = FOCUSED_TESTS + [
     ("test-codex-cli-package", ["just", "test", "-p", "codex-cli"], "."),
     ("test-codex-core-package", ["just", "test", "-p", "codex-core"], "."),
@@ -91,12 +95,23 @@ BUILD_COMMANDS = [
     )
 ]
 
+TEST_PROFILES = {
+    "none": [],
+    "focused-no-mcp": FOCUSED_NO_MCP_TESTS,
+    "focused": FOCUSED_TESTS,
+    "expanded": EXPANDED_TESTS,
+}
+
 BUILD_BINARIES = [
     "codex",
     "codex-profiles",
     "codex-app-server",
     "codex-mcp-server",
 ]
+
+RUNNABLE_STEP_NAMES = [
+    name for name, _, _ in [*BUILD_COMMANDS, *EXPANDED_TESTS]
+] + ["fix-codex-core"]
 
 
 @dataclass
@@ -197,8 +212,15 @@ class MigrationRunner:
             raise MigrationError("output path must not equal source path")
         if self.output == self.package_dir or self.output in self.package_dir.parents:
             raise MigrationError("output path must not be the migration package directory")
+        unknown_steps = sorted(set(self.args.only_step) - set(RUNNABLE_STEP_NAMES))
+        if unknown_steps:
+            raise MigrationError("unknown --only-step value(s): " + ", ".join(unknown_steps))
 
     def print_plan(self) -> None:
+        build_selected = not self.args.skip_build and any(
+            self.step_selected(name) for name, _, _ in BUILD_COMMANDS
+        )
+        profiles_dir = self.command_profiles_dir()
         plan = {
             "source": str(self.source),
             "output": str(self.output),
@@ -207,11 +229,14 @@ class MigrationRunner:
             if self.args.patch_mode == "am"
             else [str(self.patch_file)],
             "testProfile": self.args.test_profile,
-            "build": not self.args.skip_build,
+            "build": build_selected,
             "agents": self.args.agents,
             "codexReviewAuth": self.args.codex_review_auth,
             "skipApply": self.args.skip_apply,
             "targetDir": str(self.target_dir) if self.target_dir else "output/codex-rs/target",
+            "profilesDir": str(profiles_dir) if profiles_dir else "default Codex profile root",
+            "onlyStep": self.args.only_step,
+            "skipCopyArtifacts": self.args.skip_copy_artifacts,
         }
         print(json.dumps(plan, indent=2))
 
@@ -376,6 +401,7 @@ class MigrationRunner:
             "codex-review",
             command,
             cwd=self.output,
+            env=self.command_env(),
             check=self.args.agents == "required",
             timeout=self.args.agent_timeout_seconds,
         )
@@ -426,9 +452,9 @@ class MigrationRunner:
         return True, f"found {len(profiles)} managed profile(s) in {homes}"
 
     def managed_profiles_root(self) -> Path:
-        configured = os.environ.get("CODEX_PROFILES_DIR")
-        if configured and configured.strip():
-            return Path(configured).expanduser()
+        command_profiles_dir = self.command_profiles_dir()
+        if command_profiles_dir is not None:
+            return command_profiles_dir
         return Path.home() / ".config" / "codex-switch"
 
     def agent_unavailable(self, name: str, reason: str) -> None:
@@ -437,7 +463,7 @@ class MigrationRunner:
         self.record_skip(name, reason)
 
     def run_build_and_tests(self) -> None:
-        env = os.environ.copy()
+        env = self.command_env()
         env["CARGO_BUILD_JOBS"] = str(self.args.jobs)
         cargo_bin = str(Path.home() / ".cargo" / "bin")
         local_bin = str(Path.home() / ".local" / "bin")
@@ -456,7 +482,11 @@ class MigrationRunner:
             )
 
         if not self.args.skip_build:
+            build_ran = False
             for name, command, cwd in BUILD_COMMANDS:
+                if not self.step_selected(name):
+                    self.record_skip(name, "not selected by --only-step")
+                    continue
                 self.run_command(
                     name,
                     command,
@@ -465,16 +495,22 @@ class MigrationRunner:
                     check=True,
                     timeout=self.args.command_timeout_seconds,
                 )
-            self.copy_build_artifacts()
+                build_ran = True
+            if build_ran:
+                if self.args.skip_copy_artifacts:
+                    self.record_skip("copy-build-artifacts", "--skip-copy-artifacts was set")
+                else:
+                    self.copy_build_artifacts()
         else:
             self.record_skip("build-divband-binaries", "--skip-build was set")
 
-        if self.args.test_profile == "none":
+        tests = self.tests_for_run()
+        if not tests:
             self.record_skip("tests", "test profile is none")
-            return
-
-        tests = FOCUSED_TESTS if self.args.test_profile == "focused" else EXPANDED_TESTS
         for name, command, cwd in tests:
+            if not self.step_selected(name):
+                self.record_skip(name, "not selected by --only-step")
+                continue
             self.run_command(
                 name,
                 command,
@@ -483,6 +519,45 @@ class MigrationRunner:
                 check=True,
                 timeout=self.args.command_timeout_seconds,
             )
+
+        if self.args.run_fix:
+            if self.step_selected("fix-codex-core"):
+                self.run_command(
+                    "fix-codex-core",
+                    ["just", "fix", "-p", "codex-core"],
+                    cwd=self.output,
+                    env=env,
+                    check=True,
+                    timeout=self.args.command_timeout_seconds,
+                )
+            else:
+                self.record_skip("fix-codex-core", "not selected by --only-step")
+
+    def command_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        profiles_dir = self.command_profiles_dir()
+        if profiles_dir is not None:
+            (profiles_dir / "homes").mkdir(parents=True, exist_ok=True)
+            env["CODEX_PROFILES_DIR"] = str(profiles_dir)
+        return env
+
+    def command_profiles_dir(self) -> Path | None:
+        if self.args.profiles_dir is not None:
+            return self.args.profiles_dir.resolve()
+        configured = os.environ.get("CODEX_PROFILES_DIR")
+        if configured and configured.strip():
+            return Path(configured).expanduser()
+        if self.args.use_real_profiles:
+            return None
+        return self.manifest_dir / "profiles-empty"
+
+    def tests_for_run(self) -> list[tuple[str, list[str], str]]:
+        if self.args.only_step:
+            return EXPANDED_TESTS
+        return TEST_PROFILES[self.args.test_profile]
+
+    def step_selected(self, name: str) -> bool:
+        return not self.args.only_step or name in self.args.only_step
 
     def copy_build_artifacts(self) -> None:
         bin_dir = self.manifest_dir / "bin"
@@ -505,16 +580,6 @@ class MigrationRunner:
             self.record_skip(
                 "copy-build-artifacts",
                 f"no expected binaries found in {target_debug}",
-            )
-
-        if self.args.run_fix:
-            self.run_command(
-                "fix-codex-core",
-                ["just", "fix", "-p", "codex-core"],
-                cwd=self.output,
-                env=env,
-                check=True,
-                timeout=self.args.command_timeout_seconds,
             )
 
     def ensure_tool(
@@ -749,6 +814,20 @@ def parse_args(package_dir: Path, argv: list[str] | None = None) -> argparse.Nam
         default="auto",
         help="choose auth mode for the Codex review agent",
     )
+    parser.add_argument(
+        "--profiles-dir",
+        type=Path,
+        default=None,
+        help=(
+            "managed profile root used by review agents and tests; defaults to "
+            ".divband-migration/profiles-empty unless CODEX_PROFILES_DIR is set"
+        ),
+    )
+    parser.add_argument(
+        "--use-real-profiles",
+        action="store_true",
+        help="use the default ~/.config/codex-switch managed profile root",
+    )
     parser.add_argument("--agent-timeout-seconds", type=int, default=900)
     parser.add_argument("--command-timeout-seconds", type=int, default=3600)
     parser.add_argument("--jobs", type=int, default=int(os.environ.get("CARGO_BUILD_JOBS", "1")))
@@ -765,9 +844,21 @@ def parse_args(package_dir: Path, argv: list[str] | None = None) -> argparse.Nam
     )
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument(
+        "--skip-copy-artifacts",
+        action="store_true",
+        help="build binaries but do not copy debug artifacts into .divband-migration/bin",
+    )
+    parser.add_argument(
         "--test-profile",
-        choices=["none", "focused", "expanded"],
+        choices=sorted(TEST_PROFILES),
         default="focused",
+    )
+    parser.add_argument(
+        "--only-step",
+        action="append",
+        choices=RUNNABLE_STEP_NAMES,
+        default=[],
+        help="run only a named build/test/fix step; repeat to run multiple steps",
     )
     parser.add_argument(
         "--install-tools",

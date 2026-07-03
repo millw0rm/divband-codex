@@ -50,14 +50,12 @@ release.
 Minimum local matrix:
 
 ```shell
-cd codex-rs
-CARGO_BUILD_JOBS=1 just fmt
-CARGO_BUILD_JOBS=1 just test -p codex-cli best_profile
-CARGO_BUILD_JOBS=1 just test -p codex-cli resume_best
-CARGO_BUILD_JOBS=1 just test -p codex-app-server thread_profile_refresh
-CARGO_BUILD_JOBS=1 just test -p codex-core usage_limit_switches_profile_and_retries_turn
-CARGO_BUILD_JOBS=1 just test -p codex-mcp-server cursor_session
-CARGO_BUILD_JOBS=1 just fix -p codex-core
+python3 agent-coordinator/divband-codex/run.py \
+  --skip-apply \
+  --agents off \
+  --jobs 1 \
+  --test-profile focused \
+  --codex-review-auth plain
 ```
 
 Expanded local matrix when resources allow:
@@ -80,6 +78,46 @@ just test
 Use `CARGO_BUILD_JOBS=1` or `CARGO_BUILD_JOBS=2` on machines that hang during
 Rust compilation. This lowers RAM and disk pressure at the cost of longer
 builds.
+
+## Entrypoint Runtime Notes
+
+The focused entrypoint run completed with these observed timings on a warm
+shared Cargo target cache:
+
+- Binary build: 1.3 seconds.
+- `just fmt`: 6.8 seconds.
+- CLI `best_profile`: 7 passed in 1.5 seconds.
+- CLI `resume_best`: 2 passed in 1.3 seconds.
+- App-server `thread_profile_refresh`: 1 passed in 1.8 seconds.
+- Core profile failover: 1 passed in 98.5 seconds.
+- MCP cursor-session: 10 passed in 245.4 seconds.
+
+The binary build completing does not mean test compilation is over. Cargo uses
+separate test artifacts for `nextest`, and the core/MCP test filters can still
+compile large parts of the workspace.
+
+Use the runner's selective step flags for reruns:
+
+```shell
+python3 agent-coordinator/divband-codex/run.py \
+  --skip-apply \
+  --agents off \
+  --skip-copy-artifacts \
+  --only-step test-core-profile-failover
+```
+
+Use `--test-profile focused-no-mcp` when MCP code has not changed and the
+cursor-session compile cost is not needed for the current validation.
+
+By default the runner points tests at an isolated managed-profile root under
+`.divband-migration/profiles-empty`. This prevents app-server profile refresh
+tests from seeing a real local profile pool. Pass `--use-real-profiles` or
+`--profiles-dir` only when the run is intentionally validating real managed
+profiles.
+
+The shared Cargo target cache trades disk for speed. During validation it grew
+to tens of gigabytes. The copied debug binaries can also be several gigabytes;
+use `--skip-copy-artifacts` for test-only reruns.
 
 ## Feature-Specific Assertions
 
@@ -122,4 +160,3 @@ Cursor MCP:
 - Missing arguments return a structured error.
 - With a fake `cursor-agent`, the tool runs from the configured workspace and
   returns structured output.
-

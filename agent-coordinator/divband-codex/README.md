@@ -60,3 +60,74 @@ git commit -m "feat: apply divband codex overlay"
 
 After applying, follow `REBASE_PLAYBOOK.md` and `TESTING.md`.
 
+## Running The Entrypoint
+
+The single entrypoint is:
+
+```shell
+python3 agent-coordinator/divband-codex/run.py
+```
+
+For an already-applied output repository, the deterministic validation command
+used for this package is:
+
+```shell
+python3 agent-coordinator/divband-codex/run.py \
+  --skip-apply \
+  --agents off \
+  --jobs 1 \
+  --test-profile focused \
+  --codex-review-auth plain
+```
+
+Operational defaults:
+
+- The runner uses a shared Cargo target directory at
+  `agent-coordinator/divband-codex/.cache/cargo-target` so repeated runs do not
+  rebuild the whole workspace.
+- Test and review commands use an isolated managed-profile root at
+  `.divband-migration/profiles-empty` unless `CODEX_PROFILES_DIR`,
+  `--profiles-dir`, or `--use-real-profiles` is provided.
+- `--jobs 1` keeps Rust memory pressure lower. It is slower on cold caches but
+  is less likely to hang a small machine.
+- `--agents off` skips Cursor and Codex review agents. Use this for production
+  migration validation when the agent credentials are not part of the test.
+- `--codex-review-auth best --use-real-profiles` is only appropriate when a
+  valid managed profile pool is mounted and the run is intended to exercise
+  Codex review through `--best`.
+
+Useful faster reruns:
+
+```shell
+# Rerun only the core failover test after a failure.
+python3 agent-coordinator/divband-codex/run.py \
+  --skip-apply \
+  --agents off \
+  --skip-copy-artifacts \
+  --only-step test-core-profile-failover
+
+# Rerun the final two focused tests.
+python3 agent-coordinator/divband-codex/run.py \
+  --skip-apply \
+  --agents off \
+  --skip-copy-artifacts \
+  --only-step test-core-profile-failover \
+  --only-step test-mcp-cursor-session
+
+# Skip the cursor-session MCP test when MCP code was not touched.
+python3 agent-coordinator/divband-codex/run.py \
+  --skip-apply \
+  --agents off \
+  --skip-copy-artifacts \
+  --test-profile focused-no-mcp
+```
+
+Artifacts and reports:
+
+- Final report: `.divband-migration/REPORT.md`.
+- Command logs: `.divband-migration/logs/`.
+- Copied debug binaries: `.divband-migration/bin/`.
+
+The copied binaries are unstripped debug artifacts and can be several
+gigabytes. Use `--skip-copy-artifacts` for validation runs where the already
+built binaries do not need to be copied into the report directory.
