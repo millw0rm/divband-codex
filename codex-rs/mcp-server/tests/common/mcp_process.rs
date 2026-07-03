@@ -22,6 +22,7 @@ use rmcp::model::ElicitationCapability;
 use rmcp::model::FormElicitationCapability;
 use rmcp::model::Implementation;
 use rmcp::model::InitializeRequestParams;
+use rmcp::model::JsonObject;
 use rmcp::model::JsonRpcMessage;
 use rmcp::model::JsonRpcNotification;
 use rmcp::model::JsonRpcRequest;
@@ -57,6 +58,18 @@ impl McpProcess {
         codex_home: &Path,
         env_overrides: &[(&str, Option<&str>)],
     ) -> anyhow::Result<Self> {
+        Self::new_with_env_and_cwd(codex_home, env_overrides, /*cwd*/ None).await
+    }
+
+    pub async fn new_with_cwd(codex_home: &Path, cwd: &Path) -> anyhow::Result<Self> {
+        Self::new_with_env_and_cwd(codex_home, /*env_overrides*/ &[], Some(cwd)).await
+    }
+
+    async fn new_with_env_and_cwd(
+        codex_home: &Path,
+        env_overrides: &[(&str, Option<&str>)],
+        cwd: Option<&Path>,
+    ) -> anyhow::Result<Self> {
         let program = codex_utils_cargo_bin::cargo_bin("codex-mcp-server")
             .context("should find binary for codex-mcp-server")?;
         let mut cmd = Command::new(program);
@@ -66,6 +79,9 @@ impl McpProcess {
         cmd.stderr(Stdio::piped());
         cmd.env("CODEX_HOME", codex_home);
         cmd.env("RUST_LOG", "debug");
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
 
         for (k, v) in env_overrides {
             match v {
@@ -190,17 +206,28 @@ impl McpProcess {
         &mut self,
         params: CodexToolCallParam,
     ) -> anyhow::Result<i64> {
-        let codex_tool_call_params = CallToolRequestParams::new("codex").with_arguments(
-            match serde_json::to_value(params)? {
-                serde_json::Value::Object(map) => map,
-                _ => unreachable!("params serialize to object"),
-            },
-        );
-        self.send_request(
-            "tools/call",
-            Some(serde_json::to_value(codex_tool_call_params)?),
-        )
-        .await
+        let arguments = match serde_json::to_value(params)? {
+            serde_json::Value::Object(map) => map,
+            _ => unreachable!("params serialize to object"),
+        };
+        self.send_tool_call("codex", Some(arguments)).await
+    }
+
+    pub async fn send_tool_call(
+        &mut self,
+        tool_name: &str,
+        arguments: Option<JsonObject>,
+    ) -> anyhow::Result<i64> {
+        let mut params = CallToolRequestParams::new(tool_name.to_string());
+        if let Some(arguments) = arguments {
+            params = params.with_arguments(arguments);
+        }
+        self.send_request("tools/call", Some(serde_json::to_value(params)?))
+            .await
+    }
+
+    pub async fn send_list_tools(&mut self) -> anyhow::Result<i64> {
+        self.send_request("tools/list", None).await
     }
 
     async fn send_request(

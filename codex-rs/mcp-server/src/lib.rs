@@ -30,6 +30,7 @@ use tracing_subscriber::prelude::*;
 
 mod codex_tool_config;
 mod codex_tool_runner;
+mod cursor_session;
 mod exec_approval;
 pub(crate) mod message_processor;
 mod outgoing_message;
@@ -42,6 +43,7 @@ use crate::outgoing_message::OutgoingMessageSender;
 
 pub use crate::codex_tool_config::CodexToolCallParam;
 pub use crate::codex_tool_config::CodexToolCallReplyParam;
+pub use crate::cursor_session::CursorSessionToolCallParam;
 pub use crate::exec_approval::ExecApprovalElicitRequestParams;
 pub use crate::exec_approval::ExecApprovalResponse;
 pub use crate::patch_approval::PatchApprovalElicitRequestParams;

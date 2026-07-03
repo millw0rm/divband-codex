@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_arg0::Arg0DispatchPaths;
@@ -36,12 +37,15 @@ use crate::codex_tool_config::CodexToolCallParam;
 use crate::codex_tool_config::CodexToolCallReplyParam;
 use crate::codex_tool_config::create_tool_for_codex_tool_call_param;
 use crate::codex_tool_config::create_tool_for_codex_tool_call_reply_param;
+use crate::cursor_session::create_tool_for_cursor_session_tool_call_param;
+use crate::cursor_session::handle_cursor_session_tool_call;
 use crate::outgoing_message::OutgoingMessageSender;
 
 pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     initialized: bool,
     arg0_paths: Arg0DispatchPaths,
+    cursor_session_cwd: PathBuf,
     thread_manager: Arc<ThreadManager>,
     running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ThreadId>>>,
 }
@@ -66,6 +70,7 @@ impl MessageProcessor {
         let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
             config.codex_home.clone(),
         ));
+        let cursor_session_cwd = config.cwd.to_path_buf();
         let thread_manager = Arc::new(ThreadManager::new(
             config.as_ref(),
             auth_manager,
@@ -84,6 +89,7 @@ impl MessageProcessor {
             outgoing,
             initialized: false,
             arg0_paths,
+            cursor_session_cwd,
             thread_manager,
             running_requests_id_to_codex_uuid: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -321,6 +327,7 @@ impl MessageProcessor {
             tools: vec![
                 create_tool_for_codex_tool_call_param(),
                 create_tool_for_codex_tool_call_reply_param(),
+                create_tool_for_cursor_session_tool_call_param(),
             ],
             next_cursor: None,
         };
@@ -339,6 +346,12 @@ impl MessageProcessor {
             "codex-reply" => {
                 self.handle_tool_call_codex_session_reply(id, arguments)
                     .await
+            }
+            "cursor-session" => {
+                let result =
+                    handle_cursor_session_tool_call(arguments, self.cursor_session_cwd.clone())
+                        .await;
+                self.outgoing.send_response(id, result).await;
             }
             _ => {
                 let result = CallToolResult::error(vec![rmcp::model::Content::text(format!(
