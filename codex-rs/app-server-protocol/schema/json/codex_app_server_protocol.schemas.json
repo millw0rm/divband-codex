@@ -571,6 +571,30 @@
             },
             "method": {
               "enum": [
+                "thread/profile/refresh"
+              ],
+              "title": "Thread/profile/refreshRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadProfileRefreshParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/profile/refreshRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/approveGuardianDeniedAction"
               ],
               "title": "Thread/approveGuardianDeniedActionRequestMethod",
@@ -18657,6 +18681,24 @@
           "threadId"
         ],
         "title": "ThreadNameUpdatedNotification",
+        "type": "object"
+      },
+      "ThreadProfileRefreshParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadProfileRefreshParams",
+        "type": "object"
+      },
+      "ThreadProfileRefreshResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "ThreadProfileRefreshResponse",
         "type": "object"
       },
       "ThreadReadParams": {

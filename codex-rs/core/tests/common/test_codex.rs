@@ -599,9 +599,13 @@ impl TestCodexBuilder {
                     config.codex_home.clone(),
                 ))
             });
+        let auth_manager = codex_core::test_support::auth_manager_from_auth_with_home(
+            auth.clone(),
+            config.codex_home.to_path_buf(),
+        );
         let thread_manager = ThreadManager::new(
             &config,
-            codex_core::test_support::auth_manager_from_auth(auth.clone()),
+            Arc::clone(&auth_manager),
             SessionSource::Exec,
             Arc::clone(&environment_manager),
             Arc::clone(&self.extensions),
@@ -616,64 +620,61 @@ impl TestCodexBuilder {
         let thread_manager = Arc::new(thread_manager);
         let user_shell_override = self.user_shell_override.clone();
 
-        let new_conversation = match (resume_from, user_shell_override) {
-            (Some(path), Some(user_shell_override)) => {
-                let auth_manager = codex_core::test_support::auth_manager_from_auth(auth);
-                Box::pin(
+        let new_conversation =
+            match (resume_from, user_shell_override) {
+                (Some(path), Some(user_shell_override)) => Box::pin(
                     codex_core::test_support::resume_thread_from_rollout_with_user_shell_override(
                         thread_manager.as_ref(),
                         config.clone(),
                         path,
-                        auth_manager,
+                        Arc::clone(&auth_manager),
                         user_shell_override,
                         self.supports_openai_form_elicitation,
                     ),
                 )
-                .await?
-            }
-            (Some(path), None) => {
-                let auth_manager = codex_core::test_support::auth_manager_from_auth(auth);
-                Box::pin(thread_manager.resume_thread_from_rollout(
-                    config.clone(),
-                    path,
-                    auth_manager,
-                    /*parent_trace*/ None,
-                    self.supports_openai_form_elicitation,
-                ))
-                .await?
-            }
-            (None, Some(user_shell_override)) => {
-                Box::pin(
-                    codex_core::test_support::start_thread_with_user_shell_override(
-                        thread_manager.as_ref(),
+                .await?,
+                (Some(path), None) => {
+                    Box::pin(thread_manager.resume_thread_from_rollout(
                         config.clone(),
-                        user_shell_override,
+                        path,
+                        Arc::clone(&auth_manager),
+                        /*parent_trace*/ None,
                         self.supports_openai_form_elicitation,
-                    ),
-                )
-                .await?
-            }
-            (None, None) => {
-                let environments = thread_manager.default_environment_selections(&config.cwd);
-                Box::pin(
-                    thread_manager.start_thread_with_options(StartThreadOptions {
-                        config: config.clone(),
-                        allow_provider_model_fallback: false,
-                        initial_history: InitialHistory::New,
-                        history_mode: None,
-                        session_source: None,
-                        thread_source: None,
-                        dynamic_tools: Vec::new(),
-                        metrics_service_name: None,
-                        parent_trace: None,
-                        environments,
-                        thread_extension_init: Default::default(),
-                        supports_openai_form_elicitation: self.supports_openai_form_elicitation,
-                    }),
-                )
-                .await?
-            }
-        };
+                    ))
+                    .await?
+                }
+                (None, Some(user_shell_override)) => {
+                    Box::pin(
+                        codex_core::test_support::start_thread_with_user_shell_override(
+                            thread_manager.as_ref(),
+                            config.clone(),
+                            user_shell_override,
+                            self.supports_openai_form_elicitation,
+                        ),
+                    )
+                    .await?
+                }
+                (None, None) => {
+                    let environments = thread_manager.default_environment_selections(&config.cwd);
+                    Box::pin(
+                        thread_manager.start_thread_with_options(StartThreadOptions {
+                            config: config.clone(),
+                            allow_provider_model_fallback: false,
+                            initial_history: InitialHistory::New,
+                            history_mode: None,
+                            session_source: None,
+                            thread_source: None,
+                            dynamic_tools: Vec::new(),
+                            metrics_service_name: None,
+                            parent_trace: None,
+                            environments,
+                            thread_extension_init: Default::default(),
+                            supports_openai_form_elicitation: self.supports_openai_form_elicitation,
+                        }),
+                    )
+                    .await?
+                }
+            };
 
         Ok(TestCodex {
             home,

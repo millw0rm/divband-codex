@@ -25,6 +25,10 @@ pub struct SharedCliOptions {
     #[arg(long = "oss", default_value_t = false)]
     pub oss: bool,
 
+    /// Use AvalAI's OpenAI-compatible Responses endpoint.
+    #[arg(long = "avalai", default_value_t = false, conflicts_with_all = ["oss", "oss_provider"])]
+    pub avalai: bool,
+
     /// Specify which local provider to use (lmstudio or ollama).
     /// If not specified with --oss, will use config default or show selection.
     #[arg(long = "local-provider")]
@@ -33,6 +37,14 @@ pub struct SharedCliOptions {
     /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile_v2: Option<ProfileV2Name>,
+
+    /// Use a durable project-scoped Codex home for sessions, memories, and related state.
+    #[arg(long = "project", value_name = "ID")]
+    pub project: Option<String>,
+
+    /// Directory whose repository/root should be bound to --project. Defaults to --cd or cwd.
+    #[arg(long = "project-dir", value_name = "DIR", requires = "project")]
+    pub project_dir: Option<PathBuf>,
 
     /// Select the sandbox policy to use when executing model-generated shell
     /// commands.
@@ -70,8 +82,11 @@ impl SharedCliOptions {
             images,
             model,
             oss,
+            avalai,
             oss_provider,
             config_profile_v2,
+            project,
+            project_dir,
             sandbox_mode,
             dangerously_bypass_approvals_and_sandbox,
             bypass_hook_trust,
@@ -82,8 +97,11 @@ impl SharedCliOptions {
             images: root_images,
             model: root_model,
             oss: root_oss,
+            avalai: root_avalai,
             oss_provider: root_oss_provider,
             config_profile_v2: root_config_profile_v2,
+            project: root_project,
+            project_dir: root_project_dir,
             sandbox_mode: root_sandbox_mode,
             dangerously_bypass_approvals_and_sandbox: root_dangerously_bypass_approvals_and_sandbox,
             bypass_hook_trust: root_bypass_hook_trust,
@@ -94,14 +112,23 @@ impl SharedCliOptions {
         if model.is_none() {
             model.clone_from(root_model);
         }
-        if *root_oss {
+        if *root_avalai && !*oss {
+            *avalai = true;
+        }
+        if *root_oss && !*avalai {
             *oss = true;
         }
-        if oss_provider.is_none() {
+        if oss_provider.is_none() && !*avalai {
             oss_provider.clone_from(root_oss_provider);
         }
         if config_profile_v2.is_none() {
             config_profile_v2.clone_from(root_config_profile_v2);
+        }
+        if project.is_none() {
+            project.clone_from(root_project);
+        }
+        if project_dir.is_none() {
+            project_dir.clone_from(root_project_dir);
         }
         if sandbox_mode.is_none() {
             *sandbox_mode = *root_sandbox_mode;
@@ -135,8 +162,11 @@ impl SharedCliOptions {
             images,
             model,
             oss,
+            avalai,
             oss_provider,
             config_profile_v2,
+            project,
+            project_dir,
             sandbox_mode,
             dangerously_bypass_approvals_and_sandbox,
             bypass_hook_trust,
@@ -147,14 +177,26 @@ impl SharedCliOptions {
         if let Some(model) = model {
             self.model = Some(model);
         }
+        if avalai {
+            self.avalai = true;
+            self.oss = false;
+            self.oss_provider = None;
+        }
         if oss {
             self.oss = true;
+            self.avalai = false;
         }
         if let Some(oss_provider) = oss_provider {
             self.oss_provider = Some(oss_provider);
         }
         if let Some(config_profile_v2) = config_profile_v2 {
             self.config_profile_v2 = Some(config_profile_v2);
+        }
+        if let Some(project) = project {
+            self.project = Some(project);
+        }
+        if let Some(project_dir) = project_dir {
+            self.project_dir = Some(project_dir);
         }
         if subcommand_selected_sandbox_mode {
             self.sandbox_mode = sandbox_mode;

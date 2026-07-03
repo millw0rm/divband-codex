@@ -1294,12 +1294,25 @@ async fn cli_main(
                 include_non_interactive,
                 config_overrides,
             );
+            let InteractiveRemoteOptions {
+                remote,
+                remote_auth_token_env,
+            } = remote;
+            let remote = remote.or(root_remote.clone());
+            let remote_auth_token_env =
+                remote_auth_token_env.or(root_remote_auth_token_env.clone());
+            if interactive.best_profile {
+                reject_remote_mode_for_subcommand(
+                    remote.as_deref(),
+                    remote_auth_token_env.as_deref(),
+                    "resume --best",
+                )?;
+                configure_best_profile_launch(&mut interactive).await?;
+            }
             let exit_info = run_interactive_tui(
                 interactive,
-                remote.remote.or(root_remote.clone()),
-                remote
-                    .remote_auth_token_env
-                    .or(root_remote_auth_token_env.clone()),
+                remote,
+                remote_auth_token_env,
                 arg0_paths.clone(),
             )
             .await?;
@@ -1361,12 +1374,25 @@ async fn cli_main(
                 all,
                 config_overrides,
             );
+            let InteractiveRemoteOptions {
+                remote,
+                remote_auth_token_env,
+            } = remote;
+            let remote = remote.or(root_remote.clone());
+            let remote_auth_token_env =
+                remote_auth_token_env.or(root_remote_auth_token_env.clone());
+            if interactive.best_profile {
+                reject_remote_mode_for_subcommand(
+                    remote.as_deref(),
+                    remote_auth_token_env.as_deref(),
+                    "fork --best",
+                )?;
+                configure_best_profile_launch(&mut interactive).await?;
+            }
             let exit_info = run_interactive_tui(
                 interactive,
-                remote.remote.or(root_remote.clone()),
-                remote
-                    .remote_auth_token_env
-                    .or(root_remote_auth_token_env.clone()),
+                remote,
+                remote_auth_token_env,
                 arg0_paths.clone(),
             )
             .await?;
@@ -1859,10 +1885,12 @@ async fn load_exec_server_config(
 async fn configure_best_profile_launch(interactive: &mut TuiCli) -> anyhow::Result<()> {
     eprintln!("Refreshing profile usage limits...");
     let project_dir = interactive.cwd.clone();
+    let project_id = interactive.project.clone();
     let launch = tokio::task::spawn_blocking(move || {
         codex_cli::profile_manager_cmd::prepare_best_profile_launch(
             /*root_dir*/ None,
             project_dir.as_deref(),
+            project_id.as_deref(),
             /*refresh_limits*/ true,
         )
     })
@@ -1979,6 +2007,9 @@ async fn run_debug_prompt_input_command(
     let mut cli_kv_overrides = root_config_overrides
         .parse_overrides()
         .map_err(anyhow::Error::msg)?;
+    if shared.avalai {
+        codex_utils_cli::prepend_avalai_cli_overrides(&mut cli_kv_overrides);
+    }
     if interactive.web_search {
         cli_kv_overrides.push((
             "web_search".to_string(),
@@ -2519,6 +2550,8 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
         strict_config,
         approval_policy,
         web_search,
+        no_alt_screen,
+        best_profile,
         prompt,
         config_overrides,
         ..
@@ -2534,6 +2567,12 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
     }
     if strict_config {
         interactive.strict_config = true;
+    }
+    if no_alt_screen {
+        interactive.no_alt_screen = true;
+    }
+    if best_profile {
+        interactive.best_profile = true;
     }
     if let Some(prompt) = prompt {
         // Normalize CRLF/CR to LF so CLI-provided text can't leak `\r` into TUI state.
@@ -2815,6 +2854,30 @@ mod tests {
     }
 
     #[test]
+    fn exec_resume_accepts_avalai_after_subcommand() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "exec",
+            "resume",
+            "session-123",
+            "--avalai",
+            "continue",
+        ])
+        .expect("parse should succeed");
+
+        let Some(Subcommand::Exec(exec)) = cli.subcommand else {
+            panic!("expected exec subcommand");
+        };
+        let Some(codex_exec::Command::Resume(ref args)) = exec.command else {
+            panic!("expected exec resume");
+        };
+
+        assert!(exec.avalai);
+        assert_eq!(args.session_id.as_deref(), Some("session-123"));
+        assert_eq!(args.prompt.as_deref(), Some("continue"));
+    }
+
+    #[test]
     fn dangerous_bypass_conflicts_with_approval_policy() {
         let err = MultitoolCli::try_parse_from([
             "codex",
@@ -2985,6 +3048,98 @@ mod tests {
         let cli = MultitoolCli::try_parse_from(["codex", "--best"]).expect("parse");
         assert!(cli.interactive.best_profile);
         assert!(cli.subcommand.is_none());
+    }
+
+    #[test]
+    fn best_profile_parses_under_resume() {
+        let cli = finalize_resume_from_args(&["codex", "resume", "--best", "session-123"]);
+
+        assert!(cli.best_profile);
+        assert_eq!(cli.resume_session_id.as_deref(), Some("session-123"));
+    }
+
+    #[test]
+    fn root_best_profile_applies_to_resume() {
+        let cli = finalize_resume_from_args(&["codex", "--best", "resume", "session-123"]);
+
+        assert!(cli.best_profile);
+        assert_eq!(cli.resume_session_id.as_deref(), Some("session-123"));
+    }
+
+    #[test]
+    fn resume_best_rejects_remote_mode() {
+        let err =
+            reject_remote_mode_for_subcommand(Some("ws://localhost:9999"), None, "resume --best")
+                .expect_err("resume --best should reject remote mode");
+
+        assert!(
+            err.to_string().contains("not `codex resume --best`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn resume_best_rejects_remote_auth_token_env() {
+        let err = reject_remote_mode_for_subcommand(None, Some("TOKEN_ENV"), "resume --best")
+            .expect_err("resume --best should reject remote auth token env");
+
+        assert!(
+            err.to_string().contains("not `codex resume --best`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn avalai_parses_on_interactive_root() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--avalai"]).expect("parse");
+
+        assert!(cli.interactive.avalai);
+        assert!(cli.subcommand.is_none());
+    }
+
+    #[test]
+    fn project_parses_on_interactive_root() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--project", "agent-coordinator"])
+            .expect("parse");
+
+        assert_eq!(
+            cli.interactive.project.as_deref(),
+            Some("agent-coordinator")
+        );
+        assert!(cli.subcommand.is_none());
+    }
+
+    #[test]
+    fn project_parses_under_exec() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "exec",
+            "--project",
+            "agent-coordinator",
+            "list files",
+        ])
+        .expect("parse");
+
+        let Some(Subcommand::Exec(exec_cli)) = cli.subcommand else {
+            panic!("expected exec subcommand");
+        };
+        assert_eq!(exec_cli.project.as_deref(), Some("agent-coordinator"));
+    }
+
+    #[test]
+    fn avalai_conflicts_with_oss() {
+        let err = MultitoolCli::try_parse_from(["codex", "--avalai", "--oss"])
+            .expect_err("--avalai and --oss should conflict");
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn avalai_conflicts_with_local_provider() {
+        let err = MultitoolCli::try_parse_from(["codex", "--avalai", "--local-provider", "ollama"])
+            .expect_err("--avalai and --local-provider should conflict");
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]
@@ -3444,6 +3599,16 @@ mod tests {
     }
 
     #[test]
+    fn resume_merges_avalai_flag() {
+        let interactive =
+            finalize_resume_from_args(["codex", "resume", "sid", "--avalai"].as_ref());
+
+        assert!(interactive.avalai);
+        assert!(!interactive.oss);
+        assert_eq!(interactive.resume_session_id.as_deref(), Some("sid"));
+    }
+
+    #[test]
     fn resume_merges_dangerously_bypass_flag() {
         let interactive = finalize_resume_from_args(
             [
@@ -3537,6 +3702,22 @@ mod tests {
         let interactive = finalize_fork_from_args(["codex", "fork", "--all"].as_ref());
         assert!(interactive.fork_picker);
         assert!(interactive.fork_show_all);
+    }
+
+    #[test]
+    fn best_profile_parses_under_fork() {
+        let cli = finalize_fork_from_args(["codex", "fork", "--best", "session-123"].as_ref());
+
+        assert!(cli.best_profile);
+        assert_eq!(cli.fork_session_id.as_deref(), Some("session-123"));
+    }
+
+    #[test]
+    fn root_best_profile_applies_to_fork() {
+        let cli = finalize_fork_from_args(["codex", "--best", "fork", "session-123"].as_ref());
+
+        assert!(cli.best_profile);
+        assert_eq!(cli.fork_session_id.as_deref(), Some("session-123"));
     }
 
     #[test]

@@ -207,6 +207,7 @@ pub(crate) mod context_window;
 mod handlers;
 mod inject;
 mod input_queue;
+pub(crate) mod managed_profiles;
 mod mcp;
 mod mcp_runtime;
 pub(crate) mod multi_agents;

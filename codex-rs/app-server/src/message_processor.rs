@@ -1196,6 +1196,11 @@ impl MessageProcessor {
                     .thread_background_terminals_clean(&request_id, params)
                     .await
             }
+            ClientRequest::ThreadProfileRefresh { params, .. } => {
+                self.thread_processor
+                    .thread_profile_refresh(&request_id, params)
+                    .await
+            }
             ClientRequest::ThreadBackgroundTerminalsList { params, .. } => {
                 self.thread_processor
                     .thread_background_terminals_list(params)

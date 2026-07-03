@@ -448,6 +448,9 @@ impl ChatWidget {
                     self.open_usage_menu();
                 }
             }
+            SlashCommand::RefreshProfile => {
+                self.submit_op(AppCommand::refresh_profile_auth());
+            }
             SlashCommand::Ide => {
                 self.handle_ide_command();
             }
@@ -1043,6 +1046,7 @@ impl ChatWidget {
             SlashCommand::Ide
             | SlashCommand::Status
             | SlashCommand::Usage
+            | SlashCommand::RefreshProfile
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop

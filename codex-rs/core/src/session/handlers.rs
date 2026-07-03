@@ -68,6 +68,40 @@ pub async fn clean_background_terminals(sess: &Arc<Session>) {
     sess.close_unified_exec_processes().await;
 }
 
+pub async fn refresh_profile_auth(sess: &Arc<Session>, sub_id: String) {
+    let refresh_message =
+        match super::managed_profiles::refresh_managed_profile_limits(/*root_dir*/ None).await {
+            Ok(reports) => super::managed_profiles::format_refresh_message(&reports),
+            Err(err) => format!("Failed to refresh managed profiles: {err:#}"),
+        };
+    let switch_message = if let Some(profile_auth_failover) =
+        sess.services.profile_auth_failover.as_ref()
+    {
+        match profile_auth_failover
+            .switch_to_next_profile(&sess.services.auth_manager)
+            .await
+        {
+            Ok(Some(profile)) => Some(format!("Switched to profile `{profile}`.")),
+            Ok(None) => Some("No remaining managed profile is available to switch to.".to_string()),
+            Err(err) => Some(format!("Failed to switch managed profile: {err:#}")),
+        }
+    } else {
+        Some(
+            "No managed profile failover is configured. Start Codex with `--best` first."
+                .to_string(),
+        )
+    };
+    let message = match switch_message {
+        Some(switch_message) => format!("{refresh_message} {switch_message}"),
+        None => refresh_message,
+    };
+    sess.send_event_raw(Event {
+        id: sub_id,
+        msg: EventMsg::Warning(WarningEvent { message }),
+    })
+    .await;
+}
+
 pub async fn realtime_conversation_list_voices(sess: &Session, sub_id: String) {
     sess.send_event_raw(Event {
         id: sub_id,
@@ -798,6 +832,10 @@ pub(super) async fn submission_loop(
                 }
                 Op::ReloadUserConfig => {
                     reload_user_config(&sess).await;
+                    false
+                }
+                Op::RefreshProfileAuth => {
+                    refresh_profile_auth(&sess, sub.id.clone()).await;
                     false
                 }
                 Op::Compact => {

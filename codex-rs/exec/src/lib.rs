@@ -99,6 +99,8 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_cli::SharedCliOptions;
+use codex_utils_cli::prepare_project_home;
+use codex_utils_cli::prepend_avalai_cli_overrides;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
@@ -267,8 +269,11 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         images,
         model: model_cli_arg,
         oss,
+        avalai,
         oss_provider,
         config_profile_v2,
+        project,
+        project_dir,
         sandbox_mode: sandbox_mode_cli_arg,
         dangerously_bypass_approvals_and_sandbox,
         bypass_hook_trust,
@@ -298,7 +303,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
 
     // Parse `-c` overrides from the CLI.
-    let cli_kv_overrides = match config_overrides.parse_overrides() {
+    let mut cli_kv_overrides = match config_overrides.parse_overrides() {
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
         Err(e) => {
@@ -306,6 +311,9 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             std::process::exit(1);
         }
     };
+    if avalai {
+        prepend_avalai_cli_overrides(&mut cli_kv_overrides);
+    }
 
     let resolved_cwd = cwd.clone();
     let config_cwd = match resolved_cwd.as_deref() {
@@ -317,16 +325,38 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
-    let codex_home = match find_codex_home() {
+    let base_codex_home = match find_codex_home() {
         Ok(codex_home) => codex_home,
         Err(err) => {
             eprintln!("Error finding codex home: {err}");
             std::process::exit(1);
         }
     };
-    let user_config_path = config_profile_v2
+    let project_dir = project_dir.as_deref().or(cwd.as_deref());
+    let project_launch = project
+        .as_deref()
+        .map(|project_id| prepare_project_home(base_codex_home.as_path(), project_id, project_dir))
+        .transpose()?;
+    let codex_home = project_launch
         .as_ref()
-        .map(|profile_v2| resolve_profile_v2_config_path(&codex_home, profile_v2));
+        .map(|launch| launch.codex_home.clone())
+        .unwrap_or_else(|| base_codex_home.to_path_buf());
+    let config_source_home = project_launch
+        .as_ref()
+        .map(|launch| launch.base_codex_home.as_path())
+        .unwrap_or(codex_home.as_path());
+    let user_config_path = if let Some(profile_v2) = config_profile_v2.as_ref() {
+        Some(resolve_profile_v2_config_path(
+            config_source_home,
+            profile_v2,
+        ))
+    } else if project_launch.is_some() {
+        Some(AbsolutePathBuf::from_absolute_path(
+            config_source_home.join("config.toml"),
+        )?)
+    } else {
+        None
+    };
     let loader_overrides = LoaderOverrides {
         user_config_path,
         user_config_profile: config_profile_v2,

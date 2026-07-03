@@ -584,6 +584,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadShellCommandResponse,
     },
+    ThreadProfileRefresh => "thread/profile/refresh" {
+        params: v2::ThreadProfileRefreshParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadProfileRefreshResponse,
+    },
     ThreadApproveGuardianDeniedAction => "thread/approveGuardianDeniedAction" {
         params: v2::ThreadApproveGuardianDeniedActionParams,
         serialization: thread_id(params.thread_id),

@@ -118,7 +118,7 @@ enum ProfilesCommand {
     /// Show cached or refreshed usage limits.
     Limits(LimitsArgs),
 
-    /// Print the best currently usable profile.
+    /// Print the best currently usable existing profile.
     Best(ProfilesFilterArgs),
 }
 
@@ -163,11 +163,11 @@ struct ProjectArgs {
 
 #[derive(Debug, Args)]
 struct RunArgs {
-    /// Select the best usable profile from cached/refreshed limits.
+    /// Select the best usable existing profile from cached/refreshed limits.
     #[arg(long, default_value_t = false)]
     best: bool,
 
-    /// Refresh ChatGPT usage before selecting with --best.
+    /// Refresh ChatGPT usage before selecting an existing profile with --best.
     #[arg(long = "refresh-limits", default_value_t = false)]
     refresh_limits: bool,
 
@@ -183,7 +183,7 @@ struct RunArgs {
     #[arg(long = "project-dir", value_name = "DIR")]
     project_dir: Option<PathBuf>,
 
-    /// Profile name. Omit with --best to auto-select.
+    /// Existing profile name. Omit with --best to auto-select.
     name: Option<String>,
 
     /// Arguments passed after `--` are forwarded to Codex.
@@ -220,6 +220,7 @@ pub struct BestProfileLaunch {
 pub fn prepare_best_profile_launch(
     root_dir: Option<PathBuf>,
     project_dir: Option<&Path>,
+    project_id: Option<&str>,
     refresh_limits: bool,
 ) -> anyhow::Result<BestProfileLaunch> {
     let root = ProfilesRoot::new(resolve_root(root_dir)?);
@@ -229,7 +230,7 @@ pub fn prepare_best_profile_launch(
     };
     let active_profile = active.name.clone();
 
-    let (project_id, project_root) = resolve_project(project_dir, None)?;
+    let (project_id, project_root) = resolve_project(project_dir, project_id)?;
     let codex_home = root.ensure_project_home(&project_id, &project_root, &active_profile)?;
     let candidates = ranked
         .into_iter()

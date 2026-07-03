@@ -634,6 +634,12 @@ pub enum Op {
     /// enable/disable state) without restarting the thread.
     ReloadUserConfig,
 
+    /// Switch to the next managed auth profile configured by `codex --best`.
+    ///
+    /// This only swaps session auth and does not start a turn or mutate
+    /// conversation context.
+    RefreshProfileAuth,
+
     /// Request the agent to summarize the current conversation context.
     /// The agent will use its existing context (either conversation history or previous response id)
     /// to generate a summary which will be returned as an AgentMessage event.
@@ -869,6 +875,7 @@ impl Op {
             Self::DynamicToolResponse { .. } => "dynamic_tool_response",
             Self::RefreshMcpServers { .. } => "refresh_mcp_servers",
             Self::ReloadUserConfig => "reload_user_config",
+            Self::RefreshProfileAuth => "refresh_profile_auth",
             Self::Compact => "compact",
             Self::SetThreadMemoryMode { .. } => "set_thread_memory_mode",
             Self::ThreadRollback { .. } => "thread_rollback",

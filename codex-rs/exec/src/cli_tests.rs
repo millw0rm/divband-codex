@@ -62,6 +62,39 @@ fn resume_accepts_output_flags_after_subcommand() {
 }
 
 #[test]
+fn resume_accepts_avalai_after_subcommand() {
+    const PROMPT: &str = "echo resume-with-avalai";
+    let cli = Cli::parse_from(["codex-exec", "resume", "session-123", "--avalai", PROMPT]);
+
+    assert!(cli.avalai);
+    let Some(Command::Resume(args)) = cli.command else {
+        panic!("expected resume command");
+    };
+    assert_eq!(args.session_id.as_deref(), Some("session-123"));
+    assert_eq!(args.prompt.as_deref(), Some(PROMPT));
+}
+
+#[test]
+fn resume_accepts_project_after_subcommand() {
+    const PROMPT: &str = "echo resume-with-project";
+    let cli = Cli::parse_from([
+        "codex-exec",
+        "resume",
+        "session-123",
+        "--project",
+        "agent-coordinator",
+        PROMPT,
+    ]);
+
+    assert_eq!(cli.project.as_deref(), Some("agent-coordinator"));
+    let Some(Command::Resume(args)) = cli.command else {
+        panic!("expected resume command");
+    };
+    assert_eq!(args.session_id.as_deref(), Some("session-123"));
+    assert_eq!(args.prompt.as_deref(), Some(PROMPT));
+}
+
+#[test]
 fn parses_config_isolation_flags() {
     let cli = Cli::parse_from([
         "codex-exec",

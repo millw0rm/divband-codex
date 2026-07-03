@@ -723,6 +723,16 @@ impl ThreadRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
+    pub(crate) async fn thread_profile_refresh(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadProfileRefreshParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.thread_profile_refresh_inner(request_id, params)
+            .await
+            .map(|response| Some(response.into()))
+    }
+
     pub(crate) async fn thread_approve_guardian_denied_action(
         &self,
         request_id: &ConnectionRequestId,
@@ -1796,6 +1806,20 @@ impl ThreadRequestProcessor {
                 internal_error(format!("failed to clean background terminals: {err}"))
             })?;
         Ok(ThreadBackgroundTerminalsCleanResponse {})
+    }
+
+    async fn thread_profile_refresh_inner(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadProfileRefreshParams,
+    ) -> Result<ThreadProfileRefreshResponse, JSONRPCErrorError> {
+        let ThreadProfileRefreshParams { thread_id } = params;
+
+        let (_, thread) = self.load_thread(&thread_id).await?;
+        self.submit_core_op(request_id, thread.as_ref(), Op::RefreshProfileAuth)
+            .await
+            .map_err(|err| internal_error(format!("failed to refresh profile auth: {err}")))?;
+        Ok(ThreadProfileRefreshResponse {})
     }
 
     async fn thread_background_terminals_list_inner(

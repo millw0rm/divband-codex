@@ -140,6 +140,7 @@ fn best_profile_launch_prepares_project_home_and_failover_candidates() -> anyhow
     let launch = prepare_best_profile_launch(
         Some(root_dir),
         Some(project_root.as_path()),
+        /*project_id*/ None,
         /*refresh_limits*/ false,
     )?;
 

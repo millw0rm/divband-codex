@@ -60,6 +60,7 @@ use codex_rollout::state_db;
 use codex_state::log_db;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
+use codex_utils_cli::prepare_project_home;
 use codex_utils_home_dir::find_codex_home;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
@@ -879,7 +880,7 @@ pub async fn run_main(
     let raw_overrides = cli.config_overrides.raw_overrides.clone();
     // `oss` model provider.
     let overrides_cli = codex_utils_cli::CliConfigOverrides { raw_overrides };
-    let cli_kv_overrides = match overrides_cli.parse_overrides() {
+    let mut cli_kv_overrides = match overrides_cli.parse_overrides() {
         // Parse `-c` overrides from the CLI.
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
@@ -888,28 +889,52 @@ pub async fn run_main(
             std::process::exit(1);
         }
     };
+    if cli.avalai {
+        codex_utils_cli::prepend_avalai_cli_overrides(&mut cli_kv_overrides);
+    }
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
     let profile_auth_launch = cli.profile_auth_launch.clone();
+    let base_codex_home = match find_codex_home() {
+        Ok(codex_home) => codex_home.to_path_buf(),
+        #[allow(clippy::print_stderr)]
+        Err(err) => {
+            eprintln!("Error finding codex home: {err}");
+            std::process::exit(1);
+        }
+    };
+    let project_dir = cli.project_dir.as_deref().or(cli.cwd.as_deref());
+    let project_launch = if profile_auth_launch.is_none() {
+        cli.project
+            .as_deref()
+            .map(|project_id| prepare_project_home(&base_codex_home, project_id, project_dir))
+            .transpose()?
+    } else {
+        None
+    };
     let codex_home = if let Some(launch) = profile_auth_launch.as_ref() {
         launch.codex_home.clone()
     } else {
-        match find_codex_home() {
-            Ok(codex_home) => codex_home.to_path_buf(),
-            #[allow(clippy::print_stderr)]
-            Err(err) => {
-                eprintln!("Error finding codex home: {err}");
-                std::process::exit(1);
-            }
-        }
+        project_launch
+            .as_ref()
+            .map(|launch| launch.codex_home.clone())
+            .unwrap_or_else(|| base_codex_home.clone())
     };
+    let config_source_home = project_launch
+        .as_ref()
+        .map(|launch| launch.base_codex_home.as_path())
+        .unwrap_or(codex_home.as_path());
 
     let mut launch_loader_overrides = loader_overrides.clone();
     if let Some(profile_v2) = cli.config_profile_v2.as_ref() {
-        let user_config_path = resolve_profile_v2_config_path(&codex_home, profile_v2);
+        let user_config_path = resolve_profile_v2_config_path(config_source_home, profile_v2);
         launch_loader_overrides.user_config_path = Some(user_config_path);
         launch_loader_overrides.user_config_profile = Some(profile_v2.clone());
+    } else if project_launch.is_some() {
+        launch_loader_overrides.user_config_path = Some(AbsolutePathBuf::from_absolute_path(
+            config_source_home.join("config.toml"),
+        )?);
     }
     let reuse_implicit_local_daemon = can_reuse_implicit_local_daemon(
         &cli_kv_overrides,
@@ -949,9 +974,13 @@ pub async fn run_main(
         config_cwd_for_app_server_target(cwd.as_deref(), &app_server_target, &environment_manager)?;
     let mut loader_overrides = loader_overrides;
     if let Some(profile_v2) = cli.config_profile_v2.as_ref() {
-        let user_config_path = resolve_profile_v2_config_path(&codex_home, profile_v2);
+        let user_config_path = resolve_profile_v2_config_path(config_source_home, profile_v2);
         loader_overrides.user_config_path = Some(user_config_path);
         loader_overrides.user_config_profile = Some(profile_v2.clone());
+    } else if project_launch.is_some() {
+        loader_overrides.user_config_path = Some(AbsolutePathBuf::from_absolute_path(
+            config_source_home.join("config.toml"),
+        )?);
     }
 
     let bootstrap_config = load_bootstrap_config_or_exit(

@@ -27,7 +27,10 @@ use codex_config::LoaderOverrides;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerRuntimePaths;
 use codex_protocol::ThreadId;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::CliConfigOverrides;
+use codex_utils_cli::prepare_project_home;
+use codex_utils_cli::prepend_avalai_cli_overrides;
 use codex_utils_home_dir::find_codex_home;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use color_eyre::eyre::Result;
@@ -254,18 +257,40 @@ async fn start_app_server_for_archive_command(
     let strict_config = cli.strict_config;
     let raw_overrides = cli.config_overrides.raw_overrides.clone();
     let overrides_cli = CliConfigOverrides { raw_overrides };
-    let cli_kv_overrides = overrides_cli
+    let mut cli_kv_overrides = overrides_cli
         .parse_overrides()
         .map_err(|err| eyre!("failed to parse -c overrides: {err}"))?;
-    let codex_home = find_codex_home().wrap_err("failed to find Codex home")?;
+    if cli.avalai {
+        prepend_avalai_cli_overrides(&mut cli_kv_overrides);
+    }
+    let base_codex_home = find_codex_home().wrap_err("failed to find Codex home")?;
+    let project_dir = cli.project_dir.as_deref().or(cli.cwd.as_deref());
+    let project_launch = cli
+        .project
+        .as_deref()
+        .map(|project_id| prepare_project_home(base_codex_home.as_path(), project_id, project_dir))
+        .transpose()
+        .wrap_err("failed to prepare project home")?;
+    let codex_home = project_launch
+        .as_ref()
+        .map(|launch| launch.codex_home.clone())
+        .unwrap_or_else(|| base_codex_home.to_path_buf());
+    let config_source_home = project_launch
+        .as_ref()
+        .map(|launch| launch.base_codex_home.as_path())
+        .unwrap_or(codex_home.as_path());
 
     let mut launch_loader_overrides = loader_overrides.clone();
     if let Some(profile_v2) = cli.config_profile_v2.as_ref() {
         launch_loader_overrides.user_config_path = Some(resolve_profile_v2_config_path(
-            codex_home.as_path(),
+            config_source_home,
             profile_v2,
         ));
         launch_loader_overrides.user_config_profile = Some(profile_v2.clone());
+    } else if project_launch.is_some() {
+        launch_loader_overrides.user_config_path = Some(AbsolutePathBuf::from_absolute_path(
+            config_source_home.join("config.toml"),
+        )?);
     }
 
     let reuse_implicit_local_daemon = super::can_reuse_implicit_local_daemon(
@@ -308,10 +333,14 @@ async fn start_app_server_for_archive_command(
     let mut loader_overrides = loader_overrides;
     if let Some(profile_v2) = cli.config_profile_v2.as_ref() {
         loader_overrides.user_config_path = Some(resolve_profile_v2_config_path(
-            codex_home.as_path(),
+            config_source_home,
             profile_v2,
         ));
         loader_overrides.user_config_profile = Some(profile_v2.clone());
+    } else if project_launch.is_some() {
+        loader_overrides.user_config_path = Some(AbsolutePathBuf::from_absolute_path(
+            config_source_home.join("config.toml"),
+        )?);
     }
 
     let bootstrap_config = load_config_toml_with_layer_stack(
@@ -362,6 +391,7 @@ async fn start_app_server_for_archive_command(
     });
     let cwd = cli.cwd.clone();
     let config = ConfigBuilder::default()
+        .codex_home(codex_home.clone())
         .cli_overrides(cli_kv_overrides.clone())
         .harness_overrides(ConfigOverrides {
             model,

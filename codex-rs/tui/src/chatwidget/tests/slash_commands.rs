@@ -35,6 +35,18 @@ fn fast_tier_command() -> ServiceTierCommand {
     }
 }
 
+#[tokio::test]
+async fn refresh_profile_command_submits_profile_auth_refresh() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.dispatch_command(SlashCommand::RefreshProfile);
+
+    match op_rx.try_recv() {
+        Ok(Op::RefreshProfileAuth) => {}
+        other => panic!("expected RefreshProfileAuth op, got {other:?}"),
+    }
+}
+
 fn complete_turn_with_message(chat: &mut ChatWidget, turn_id: &str, message: Option<&str>) {
     if let Some(message) = message {
         complete_assistant_message(

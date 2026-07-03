@@ -34,7 +34,7 @@ pub(crate) struct ProfileAuthFailover {
 
 impl ProfileAuthFailover {
     pub(crate) fn new(codex_home: PathBuf, config: ProfileAuthFailoverConfig) -> Option<Self> {
-        if config.candidates.len() < 2 {
+        if config.candidates.is_empty() {
             return None;
         }
         let candidates = config
@@ -76,6 +76,24 @@ impl ProfileAuthFailover {
         let Some(next) = next else {
             return Ok(None);
         };
+        self.switch_to_candidate(auth_manager, next).await
+    }
+
+    pub(crate) async fn switch_to_next_profile(
+        &self,
+        auth_manager: &AuthManager,
+    ) -> anyhow::Result<Option<String>> {
+        let Some(next) = self.next_candidate_after_marking_active_limited()? else {
+            return Ok(None);
+        };
+        self.switch_to_candidate(auth_manager, next).await
+    }
+
+    async fn switch_to_candidate(
+        &self,
+        auth_manager: &AuthManager,
+        next: ProfileAuthCandidate,
+    ) -> anyhow::Result<Option<String>> {
         copy_auth_file(&next.auth_file, &self.codex_home.join("auth.json"))?;
         auth_manager.reload().await;
 

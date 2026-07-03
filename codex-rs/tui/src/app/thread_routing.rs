@@ -735,6 +735,10 @@ impl App {
                 app_server.reload_user_config().await?;
                 Ok(true)
             }
+            AppCommand::RefreshProfileAuth => {
+                app_server.thread_profile_refresh(thread_id).await?;
+                Ok(true)
+            }
             AppCommand::OverrideTurnContext { .. } => {
                 self.sync_override_turn_context_settings(app_server, thread_id, op)
                     .await;

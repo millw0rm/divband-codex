@@ -49,6 +49,8 @@ pub enum SlashCommand {
     Mention,
     Status,
     Usage,
+    #[strum(to_string = "refresh-profiles", serialize = "refresh-profile")]
+    RefreshProfile,
     DebugConfig,
     Title,
     Statusline,
@@ -104,6 +106,9 @@ impl SlashCommand {
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Usage => "view account usage or use a usage limit reset",
+            SlashCommand::RefreshProfile => {
+                "switch to the next managed profile when started with --best"
+            }
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
@@ -180,6 +185,7 @@ impl SlashCommand {
                 | SlashCommand::Mention
                 | SlashCommand::Status
                 | SlashCommand::Usage
+                | SlashCommand::RefreshProfile
                 | SlashCommand::Ide
         )
     }
@@ -219,6 +225,7 @@ impl SlashCommand {
             | SlashCommand::Hooks
             | SlashCommand::Status
             | SlashCommand::Usage
+            | SlashCommand::RefreshProfile
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop
@@ -303,6 +310,19 @@ mod tests {
         assert_eq!(
             SlashCommand::from_str("approve"),
             Ok(SlashCommand::AutoReview)
+        );
+    }
+
+    #[test]
+    fn refresh_profile_command_uses_dash_name() {
+        assert_eq!(SlashCommand::RefreshProfile.command(), "refresh-profiles");
+        assert_eq!(
+            SlashCommand::from_str("refresh-profiles"),
+            Ok(SlashCommand::RefreshProfile)
+        );
+        assert_eq!(
+            SlashCommand::from_str("refresh-profile"),
+            Ok(SlashCommand::RefreshProfile)
         );
     }
 }
