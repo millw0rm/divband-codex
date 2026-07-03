@@ -106,10 +106,30 @@ $CURSOR_SESSION_HOME/.config/cursor/auth.json
 Codex review defaults to:
 
 ```shell
+codex --best exec --sandbox read-only
+```
+
+when managed profiles are available. The runner checks:
+
+- `CODEX_PROFILES_DIR`, if set
+- otherwise `~/.config/codex-switch`
+- at least one `homes/*/auth.json`
+
+If that check fails, default `auto` mode falls back to:
+
+```shell
 codex exec --sandbox read-only
 ```
 
-Override it with:
+Control this explicitly with:
+
+```shell
+--codex-review-auth auto   # use --best when profiles are present, otherwise plain
+--codex-review-auth best   # require managed profiles for the Codex review agent
+--codex-review-auth plain  # never use --best for the Codex review agent
+```
+
+An explicit command still wins over that selection:
 
 ```shell
 export DIVBAND_CODEX_REVIEW_COMMAND='codex exec --sandbox read-only'

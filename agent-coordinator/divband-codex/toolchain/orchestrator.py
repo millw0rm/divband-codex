@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -211,6 +209,7 @@ class MigrationRunner:
             "testProfile": self.args.test_profile,
             "build": not self.args.skip_build,
             "agents": self.args.agents,
+            "codexReviewAuth": self.args.codex_review_auth,
             "skipApply": self.args.skip_apply,
             "targetDir": str(self.target_dir) if self.target_dir else "output/codex-rs/target",
         }
@@ -361,10 +360,9 @@ class MigrationRunner:
         )
 
     def run_codex_review(self, prompt: str) -> None:
-        command_text = os.environ.get(
-            "DIVBAND_CODEX_REVIEW_COMMAND",
-            "codex exec --sandbox read-only",
-        )
+        command_text = self.codex_review_command_text()
+        if command_text is None:
+            return
         command_parts = shlex.split(command_text)
         if not command_parts:
             self.agent_unavailable("codex-review", "DIVBAND_CODEX_REVIEW_COMMAND is empty")
@@ -381,6 +379,57 @@ class MigrationRunner:
             check=self.args.agents == "required",
             timeout=self.args.agent_timeout_seconds,
         )
+
+    def codex_review_command_text(self) -> str | None:
+        explicit = os.environ.get("DIVBAND_CODEX_REVIEW_COMMAND")
+        if explicit is not None:
+            return explicit
+
+        plain = "codex exec --sandbox read-only"
+        best = "codex --best exec --sandbox read-only"
+        if self.args.codex_review_auth == "plain":
+            self.record_skip("codex-review-auth", "using plain Codex review by request")
+            return plain
+        if self.args.codex_review_auth == "best":
+            if not self.managed_profiles_available():
+                self.agent_unavailable(
+                    "codex-review-auth",
+                    "managed profiles are required for --best but were not found",
+                )
+                return None
+            self.record_skip("codex-review-auth", "using codex --best review by request")
+            return best
+
+        available, reason = self.managed_profiles_status()
+        if available:
+            self.record_skip("codex-review-auth", f"using codex --best review: {reason}")
+            return best
+        self.record_skip("codex-review-auth", f"falling back to plain Codex review: {reason}")
+        return plain
+
+    def managed_profiles_available(self) -> bool:
+        available, _ = self.managed_profiles_status()
+        return available
+
+    def managed_profiles_status(self) -> tuple[bool, str]:
+        root = self.managed_profiles_root()
+        homes = root / "homes"
+        if not homes.is_dir():
+            return False, f"profile homes directory does not exist: {homes}"
+
+        profiles = []
+        for child in sorted(homes.iterdir()):
+            if child.is_dir() and (child / "auth.json").is_file():
+                profiles.append(child.name)
+        if not profiles:
+            return False, f"no managed profile auth files found in {homes}"
+        return True, f"found {len(profiles)} managed profile(s) in {homes}"
+
+    def managed_profiles_root(self) -> Path:
+        configured = os.environ.get("CODEX_PROFILES_DIR")
+        if configured and configured.strip():
+            return Path(configured).expanduser()
+        return Path.home() / ".config" / "codex-switch"
 
     def agent_unavailable(self, name: str, reason: str) -> None:
         if self.args.agents == "required":
@@ -606,6 +655,7 @@ File inventory:
             "patchMode": self.args.patch_mode,
             "outputBranch": self.args.output_branch,
             "targetDir": str(self.target_dir) if self.target_dir else None,
+            "codexReviewAuth": self.args.codex_review_auth,
             "docs": self.docs_manifest(),
             "commands": [record.as_json() for record in self.records],
         }
@@ -692,6 +742,12 @@ def parse_args(package_dir: Path, argv: list[str] | None = None) -> argparse.Nam
         choices=["off", "available", "required"],
         default="available",
         help="run Codex/Cursor review agents when available",
+    )
+    parser.add_argument(
+        "--codex-review-auth",
+        choices=["auto", "plain", "best"],
+        default="auto",
+        help="choose auth mode for the Codex review agent",
     )
     parser.add_argument("--agent-timeout-seconds", type=int, default=900)
     parser.add_argument("--command-timeout-seconds", type=int, default=3600)
