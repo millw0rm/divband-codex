@@ -157,6 +157,51 @@ fn resolve_managed_session_home_finds_project_session_by_id() -> anyhow::Result<
 }
 
 #[test]
+fn resolve_managed_session_home_ignores_uuid_mentions_in_other_transcripts() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let root_dir = temp.path().join("codex-profiles");
+    let root = ProfilesRoot::new(root_dir.clone());
+    let source = temp.path().join("auth.json");
+    write_api_auth(&source, "sk-project")?;
+    root.import_profile("main", &source)?;
+
+    let session_id = "123e4567-e89b-12d3-a456-426614174000";
+    let owning_root = temp.path().join("owning-workspace");
+    let noisy_root = temp.path().join("noisy-workspace");
+    fs::create_dir(&owning_root)?;
+    fs::create_dir(&noisy_root)?;
+    let owning_home = root.ensure_project_home("owning-123", &owning_root, "main")?;
+    let noisy_home = root.ensure_project_home("noisy-123", &noisy_root, "main")?;
+
+    let owning_session_dir = owning_home.join("sessions/2026/07/04");
+    fs::create_dir_all(&owning_session_dir)?;
+    fs::write(
+        owning_session_dir.join(format!("rollout-2026-07-04T00-00-00-{session_id}.jsonl")),
+        format!(r#"{{"type":"session_meta","payload":{{"session_id":"{session_id}"}}}}"#),
+    )?;
+
+    let noisy_session_dir = noisy_home.join("sessions/2026/07/05");
+    fs::create_dir_all(&noisy_session_dir)?;
+    fs::write(
+        noisy_session_dir
+            .join("rollout-2026-07-05T00-00-00-223e4567-e89b-12d3-a456-426614174000.jsonl"),
+        format!(r#"{{"type":"event_msg","payload":{{"message":"codex resume {session_id}"}}}}"#),
+    )?;
+
+    let owner = resolve_managed_session_home(Some(root_dir), session_id)?.expect("session owner");
+
+    assert_eq!(owner.codex_home, owning_home);
+    assert_eq!(
+        owner.kind,
+        ManagedSessionHomeKind::Project {
+            id: "owning-123".to_string(),
+            project_root: Some(owning_root),
+        }
+    );
+    Ok(())
+}
+
+#[test]
 fn best_profile_launch_prepares_project_home_and_failover_candidates() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let root_dir = temp.path().join("codex-profiles");

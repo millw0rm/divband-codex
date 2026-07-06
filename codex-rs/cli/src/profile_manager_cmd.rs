@@ -335,6 +335,7 @@ fn read_valid_home_dirs(root: &Path) -> anyhow::Result<Vec<HomeDirEntry>> {
 }
 
 fn home_has_resume_target(home: &Path, target: &str) -> anyhow::Result<bool> {
+    let target_is_uuid = is_uuid_like(target);
     let sessions = home.join("sessions");
     let mut stack = vec![sessions];
     while let Some(dir) = stack.pop() {
@@ -354,17 +355,38 @@ fn home_has_resume_target(home: &Path, target: &str) -> anyhow::Result<bool> {
             if path.extension().is_none_or(|ext| ext != "jsonl") {
                 continue;
             }
-            if path
+            let filename_matches = path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.contains(target))
-                || file_contains(&path, target)?
-            {
+                .is_some_and(|name| name.contains(target));
+            if filename_matches || (!target_is_uuid && file_contains(&path, target)?) {
                 return Ok(true);
             }
         }
     }
     Ok(false)
+}
+
+fn is_uuid_like(target: &str) -> bool {
+    let bytes = target.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (idx, byte) in bytes.iter().enumerate() {
+        match idx {
+            8 | 13 | 18 | 23 => {
+                if *byte != b'-' {
+                    return false;
+                }
+            }
+            _ => {
+                if !byte.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 fn file_contains(path: &Path, target: &str) -> anyhow::Result<bool> {
